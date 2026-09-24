@@ -1,8 +1,10 @@
-// Build script: runs TypeScript via the project's tsx/typescript
-// installation and emits ES2022 JS into ./dist. There is no separate
-// bundler step; Herdr invokes the dist/*.js files directly with Node.
+// Build script: ensures devDependencies are installed, then runs
+// `tsc -p tsconfig.build.json` to emit ES2022 JS into ./dist.
+//
+// Herdr's `plugin install` runs build commands without first running
+// `npm install`, so this script bootstraps dependencies when needed.
 
-import { spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -11,7 +13,21 @@ const tsc = resolve(root, "node_modules", ".bin", "tsc");
 
 if (!existsSync(tsc)) {
   process.stderr.write(
-    `tsc not found at ${tsc}; run \`npm install\` first to install devDependencies.\n`,
+    `devDependencies not installed; running \`npm ci --omit=dev=false\` in ${root}\n`,
+  );
+  const install = spawnSync("npm", ["ci", "--omit=dev=false"], {
+    stdio: "inherit",
+    cwd: root,
+  });
+  if (install.status !== 0) {
+    process.stderr.write(`npm ci failed with status ${install.status}\n`);
+    process.exit(install.status ?? 1);
+  }
+}
+
+if (!existsSync(tsc)) {
+  process.stderr.write(
+    `tsc still not found at ${tsc}; aborting build.\n`,
   );
   process.exit(2);
 }
@@ -19,10 +35,8 @@ if (!existsSync(tsc)) {
 const distDir = resolve(root, "dist");
 rmSync(distDir, { recursive: true, force: true });
 
-const child = spawn(tsc, ["-p", resolve(root, "tsconfig.build.json")], {
+const child = spawnSync(tsc, ["-p", resolve(root, "tsconfig.build.json")], {
   stdio: "inherit",
   cwd: root,
 });
-child.on("exit", (code) => {
-  process.exit(code ?? 1);
-});
+process.exit(child.status ?? 1);
