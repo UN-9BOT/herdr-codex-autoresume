@@ -1,0 +1,38 @@
+id = "codex.autoresume"
+name = "Codex Auto Resume"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Automatically resumes Codex CLI /goal after usage limits reset."
+platforms = ["linux", "macos", "windows"]
+
+[[build]]
+command = ["node", "./scripts/build.mjs"]
+
+[[startup]]
+command = ["node", "dist/cli/startup.js"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["node", "dist/cli/event.js", "agent_detected"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["node", "dist/cli/event.js", "agent_status_changed"]
+
+[[actions]]
+id = "status"
+title = "Codex Auto Resume: Status"
+contexts = ["pane", "workspace", "tab", "global"]
+command = ["node", "dist/cli/status.js"]
+
+[[actions]]
+id = "resume-now"
+title = "Codex Auto Resume: Resume now"
+contexts = ["pane", "workspace", "tab"]
+command = ["node", "dist/cli/resume-now.js"]
+
+[[actions]]
+id = "cancel"
+title = "Codex Auto Resume: Cancel"
+contexts = ["pane", "workspace", "tab"]
+command = ["node", "dist/cli/cancel.js"]

@@ -1,0 +1,22 @@
+{
+  "name": "herdr-codex-autoresume",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Herdr plugin that automatically resumes Codex CLI /goal after usage-limit reset.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --import tsx ./test/*.test.ts",
+    "lint:format": "node ./scripts/format.mjs --check"
+  },
+  "devDependencies": {
+    "tsx": "4.19.2",
+    "typescript": "5.7.2"
+  }
+}
