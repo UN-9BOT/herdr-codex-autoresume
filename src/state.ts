@@ -53,7 +53,7 @@ function coerceEntry(paneId: string, raw: unknown): ResumeEntry | null {
 }
 
 export function emptyState(): PersistedState {
-  return { version: CURRENT_STATE_VERSION, nextWakeAtMs: 0, entries: {} };
+  return { version: CURRENT_STATE_VERSION, nextWakeAtMs: 0, entries: {}, modelsByPane: {}, cancelledPaneIds: [] };
 }
 
 export class StateStore {
@@ -100,6 +100,8 @@ export class StateStore {
       version: CURRENT_STATE_VERSION,
       nextWakeAtMs: typeof state.nextWakeAtMs === "number" ? state.nextWakeAtMs : 0,
       entries: { ...state.entries },
+      modelsByPane: { ...(state.modelsByPane ?? {}) },
+      cancelledPaneIds: Array.from(new Set(state.cancelledPaneIds ?? [])),
     };
     await writeJsonAtomic(this.stateFile(), next);
   }
@@ -162,10 +164,22 @@ function coerceState(raw: unknown): PersistedState {
     const entry = coerceEntry(k, v);
     if (entry) entries[k] = entry;
   }
+  const modelsByPane: Record<string, string> = {};
+  const rawModels = isPlainObject(raw.modelsByPane) ? raw.modelsByPane : {};
+  for (const [k, v] of Object.entries(rawModels)) {
+    if (typeof v === "string" && v !== "") modelsByPane[k] = v;
+  }
+  const cancelledPaneIds: string[] = [];
+  const rawCancels = Array.isArray(raw.cancelledPaneIds) ? raw.cancelledPaneIds : [];
+  for (const v of rawCancels) {
+    if (typeof v === "string" && v !== "") cancelledPaneIds.push(v);
+  }
   return {
     version: CURRENT_STATE_VERSION,
     nextWakeAtMs: typeof raw.nextWakeAtMs === "number" ? raw.nextWakeAtMs : 0,
     entries,
+    modelsByPane,
+    cancelledPaneIds,
   };
 }
 

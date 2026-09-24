@@ -2,7 +2,7 @@
 // a fresh process; it must finish quickly and cannot own a long-running
 // loop. It writes intent files; the long-lived scheduler drains them.
 
-import { detectCodexModel, detectUsageLimit } from "./detector.js";
+import { detectCodexModel, detectUsageLimit, isLikelyCodexModel } from "./detector.js";
 import { loadConfig } from "./config.js";
 import { type HerdrClient, type PaneSnapshot } from "./herdr.js";
 import { StateStore } from "./state.js";
@@ -53,7 +53,8 @@ export async function handleAgentDetected(ctx: EventContext): Promise<void> {
   let originalModel: string | undefined;
   try {
     const text = await herdr.readPane(paneId, { source: "recent", lines: config.maxReadLines });
-    originalModel = detectCodexModel(text) ?? config.defaultCodexModel;
+    const detected = detectCodexModel(text);
+    originalModel = detected && isLikelyCodexModel(detected) ? detected : config.defaultCodexModel;
   } catch {
     originalModel = config.defaultCodexModel;
   }
@@ -94,7 +95,8 @@ export async function handleAgentStatusChanged(ctx: EventContext): Promise<void>
   } catch {
     /* ignore — the refresh intent is still useful */
   }
-  const originalModel = detectCodexModel(text) ?? config.defaultCodexModel;
+  const detected = detectCodexModel(text);
+  const originalModel = detected && isLikelyCodexModel(detected) ? detected : config.defaultCodexModel;
 
   // First, refresh the entry's session/status/model state.
   await store.writeIntent({

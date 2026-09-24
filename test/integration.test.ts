@@ -146,6 +146,47 @@ describe("end-to-end", () => {
     assert.equal(state.entries["w1:p1"]?.status, "cancelled");
     assert.equal(herdr.splitPaneCalls.length, 0);
   });
+
+  it("cancel intent that arrives BEFORE detect_limit still cancels (lex-order race)", async () => {
+    // Force the race by pre-seeding the cancelled list before the
+    // scheduler sees the detect_limit intent.
+    const herdr = new FakeHerdr({
+      panes: { "w1:p1": makeCodexPane("w1:p1") },
+      texts: { "w1:p1": MODEL_TEXT },
+      nextPaneIds: ["w1:p2"],
+    });
+    const store = new StateStore(dir);
+    // Cancel arrives first.
+    await store.writeIntent({ kind: "cancel", paneId: "w1:p1", atMs: NOW0 });
+    // Then detect_limit.
+    await store.writeIntent({
+      kind: "detect_limit",
+      paneId: "w1:p1",
+      agentKind: "codex",
+      sessionId: SESSION,
+      originalModel: "gpt-5.6-sol",
+      detectedAtMs: NOW0 + 1,
+      resetAtMs: NOW0 + 100,
+      snippet: "usage limit hit",
+    });
+    const cfg = { ...defaultConfig(), pollIntervalSeconds: 1 };
+    const ac = new AbortController();
+    const promise = runScheduler({ stateDir: dir, config: cfg, herdr, log: new NoopLogger(), now: () => NOW0 }, ac.signal);
+    await new Promise((r) => setTimeout(r, 1_500));
+    ac.abort();
+    await promise;
+    const state = await store.load();
+    // Either the cancel suppressed the detect_limit (no entry, or
+    // tombstone entry with status=cancelled and no resetAtMs), or the
+    // detect_limit arrived first and the cancel subsequently flipped
+    // its status to cancelled. In both cases status must be cancelled
+    // and the scheduler must not have spawned a resume pane.
+    const entry = state.entries["w1:p1"];
+    if (entry) {
+      assert.equal(entry.status, "cancelled", "entry must be marked cancelled");
+    }
+    assert.equal(herdr.splitPaneCalls.length, 0, "scheduler must not have spawned a resume pane");
+  });
 });
 
 describe("e2e cleanup", () => {

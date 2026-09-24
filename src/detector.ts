@@ -42,6 +42,21 @@ export function detectCodexModel(text: string): string | null {
   return candidate;
 }
 
+/**
+ * Sanity-check a candidate model name. After Codex hits a usage limit
+ * it auto-switches the open TUI to a "Luna Reserve" model whose header
+ * reads "GPT-Reserve high" — the raw parser accepts that as a model
+ * name ("GPT-Reserve"), but it is the placeholder, not the user's
+ * original model. This helper rejects the placeholder so the plugin
+ * never uses it to relaunch `codex resume`.
+ */
+export function isLikelyCodexModel(candidate: string): boolean {
+  const lower = candidate.toLowerCase();
+  if (lower === "reserve" || lower.includes("reserve")) return false;
+  if (lower.length < 3) return false;
+  return true;
+}
+
 const MAX_SNIPPET = 200;
 
 const LIMIT_KEYWORDS: Array<{ rule: string; pattern: RegExp }> = [

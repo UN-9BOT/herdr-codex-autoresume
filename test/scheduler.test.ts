@@ -183,6 +183,57 @@ describe("scheduler", () => {
     assert.equal(herdr.splitPaneCalls.length, 0);
   });
 
+  it("uses cached model when detect_limit arrives after auto-switch to Reserve", async () => {
+    // Simulate: Codex was running on "gpt-5.6-sol" (captured via
+    // refresh_status); then hit limit and the pane text now shows
+    // "GPT-Reserve high"; the detect_limit intent carries no usable
+    // model because the parser rejects "Reserve".
+    const store = new StateStore(dir);
+    await store.writeIntent({
+      kind: "refresh_status",
+      paneId: "w1:p1",
+      agentStatus: "idle",
+      atMs: NOW0,
+      hasAgent: true,
+      sessionId: SESSION,
+      originalModel: "gpt-5.6-sol",
+    });
+    await store.writeIntent({
+      kind: "detect_limit",
+      paneId: "w1:p1",
+      agentKind: "codex",
+      sessionId: SESSION,
+      detectedAtMs: NOW0 + 1_000,
+      resetAtMs: NOW0 + 50,
+      snippet: "You've hit your usage limit; try again at 2026-09-24T20:00:01Z",
+    });
+    let now = NOW0;
+    const cfg = {
+      ...defaultConfig(),
+      pollIntervalSeconds: 1,
+      resumeVerificationSeconds: 1,
+      resumePaneLaunchTimeoutSeconds: 1,
+      resumeDialogTimeoutSeconds: 1,
+    };
+    const herdr = new FakeHerdr({
+      panes: { "w1:p1": makeCodexPane("w1:p1", { agentSessionId: SESSION }) },
+      texts: { "w1:p1": MODEL_TEXT },
+      nextPaneIds: ["w1:p2"],
+      dialogMatch: "Resume paused goal?",
+    });
+    const ac = new AbortController();
+    const promise = runScheduler({ stateDir: dir, config: cfg, herdr, log: new NoopLogger(), now: () => now }, ac.signal);
+    now = NOW0 + 200;
+    await new Promise((r) => setTimeout(r, 300));
+    ac.abort();
+    await promise;
+    const state = await store.load();
+    // The model used to launch codex resume must be the cached one,
+    // not whatever the live pane now shows (which would be "Reserve").
+    assert.deepEqual(herdr.runPaneCommandCalls[0]?.command, ["codex", "-m", "gpt-5.6-sol", "resume", SESSION]);
+    assert.equal(state.entries["w1:p1"]?.originalModel, "gpt-5.6-sol");
+  });
+
   it("survives a restart by reloading pending entries from disk", async () => {
     const store = new StateStore(dir);
     await store.save({
@@ -200,6 +251,8 @@ describe("scheduler", () => {
           resumeAttempts: 0,
         },
       },
+      modelsByPane: { "w1:p1": "gpt-5.6-sol" },
+      cancelledPaneIds: [],
     });
     const herdr = new FakeHerdr({
       panes: { "w1:p1": makeCodexPane("w1:p1", { agentSessionId: SESSION }) },

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   detectCodexModel,
   detectUsageLimit,
+  isLikelyCodexModel,
   isStillLimited,
   parseAbsoluteReset,
   parseRelativeDuration,
@@ -185,5 +186,17 @@ describe("detectCodexModel", () => {
 
   it("returns null on empty input", () => {
     assert.equal(detectCodexModel(""), null);
+  });
+});
+
+describe("isLikelyCodexModel", () => {
+  it("rejects the Luna Reserve placeholder", () => {
+    assert.equal(isLikelyCodexModel("GPT-Reserve"), false);
+    assert.equal(isLikelyCodexModel("reserve"), false);
+  });
+  it("accepts real model names", () => {
+    assert.equal(isLikelyCodexModel("GPT-5.4"), true);
+    assert.equal(isLikelyCodexModel("GPT-5.6-sol"), true);
+    assert.equal(isLikelyCodexModel("gpt-6-sol"), true);
   });
 });

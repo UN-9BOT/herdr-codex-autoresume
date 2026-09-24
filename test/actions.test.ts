@@ -1,6 +1,6 @@
 // Action tests: status, resume-now, cancel.
 
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,11 +14,21 @@ import { FakeHerdr, makeCodexPane } from "./fake-herdr.js";
 
 let dir: string;
 let configDir: string;
+let prevStateDir: string | undefined;
+let prevConfigDir: string | undefined;
 beforeEach(async () => {
+  prevStateDir = process.env.HERDR_PLUGIN_STATE_DIR;
+  prevConfigDir = process.env.HERDR_PLUGIN_CONFIG_DIR;
   dir = await mkdtemp(join(tmpdir(), "codex-actions-"));
   configDir = await mkdtemp(join(tmpdir(), "codex-actions-cfg-"));
   process.env.HERDR_PLUGIN_STATE_DIR = dir;
   process.env.HERDR_PLUGIN_CONFIG_DIR = configDir;
+});
+afterEach(() => {
+  if (prevStateDir === undefined) delete process.env.HERDR_PLUGIN_STATE_DIR;
+  else process.env.HERDR_PLUGIN_STATE_DIR = prevStateDir;
+  if (prevConfigDir === undefined) delete process.env.HERDR_PLUGIN_CONFIG_DIR;
+  else process.env.HERDR_PLUGIN_CONFIG_DIR = prevConfigDir;
 });
 
 const SESSION = "0190aaaa-bbbb-cccc-dddd-000000000001";
@@ -48,6 +58,8 @@ describe("status", () => {
           originalModel: "gpt-5.6-sol",
         },
       },
+      modelsByPane: { "w1:p1": "gpt-5.6-sol" },
+      cancelledPaneIds: [],
     });
     const report = await buildStatusReport(dir, {});
     assert.equal(report.allEntries.length, 1);
@@ -103,6 +115,8 @@ describe("cancel", () => {
           resumeAttempts: 0,
         },
       },
+      modelsByPane: {},
+      cancelledPaneIds: [],
     });
     const result = await cancelResume(dir, { paneId: "w1:p1" });
     assert.equal(result.invoked, true);

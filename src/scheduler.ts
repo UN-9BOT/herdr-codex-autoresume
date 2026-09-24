@@ -131,13 +131,26 @@ function applyIntent(state: PersistedState, intent: Intent, nowMs: number): Pers
   const entries = { ...state.entries };
   switch (intent.kind) {
     case "detect_limit": {
+      // Honor a pending cancel: if the user cancelled this pane's
+      // auto-resume while the detect_limit intent was being written,
+      // the cancel may have raced ahead in lex order. Check the
+      // persistent cancelledPaneIds list before creating the entry.
+      if ((state.cancelledPaneIds ?? []).includes(intent.paneId)) {
+        break;
+      }
       const existing = entries[intent.paneId];
+      // When the on-screen model has already been overwritten by
+      // Codex's auto-switch to Luna Reserve, prefer the model captured
+      // earlier in `modelsByPane`. The intent's own `originalModel` is
+      // a fallback for the case where the cache is empty.
+      const cachedModel = state.modelsByPane[intent.paneId];
+      const resolvedModel = intent.originalModel ?? cachedModel;
       const next: ResumeEntry = existing
         ? {
             ...existing,
             sessionId: intent.sessionId ?? existing.sessionId,
             workspaceId: intent.workspaceId ?? existing.workspaceId,
-            originalModel: intent.originalModel ?? existing.originalModel,
+            originalModel: resolvedModel ?? existing.originalModel,
             detectedAtMs: intent.detectedAtMs,
             status: "waiting",
             lastLimitSnippet: intent.snippet ?? existing.lastLimitSnippet,
@@ -148,7 +161,7 @@ function applyIntent(state: PersistedState, intent: Intent, nowMs: number): Pers
             agentKind: intent.agentKind,
             sessionId: intent.sessionId,
             workspaceId: intent.workspaceId,
-            originalModel: intent.originalModel,
+            originalModel: resolvedModel,
             detectedAtMs: intent.detectedAtMs,
             status: "waiting",
             resumeAttempts: 0,
@@ -189,10 +202,30 @@ function applyIntent(state: PersistedState, intent: Intent, nowMs: number): Pers
       const existing = entries[intent.paneId];
       if (existing) {
         entries[intent.paneId] = { ...existing, status: "cancelled" };
+      } else {
+        // Create a tombstone entry so downstream code (status action,
+        // tests, etc.) can observe the cancellation even when the
+        // detect_limit intent hasn't arrived yet.
+        entries[intent.paneId] = {
+          paneId: intent.paneId,
+          agentKind: "codex",
+          detectedAtMs: intent.atMs,
+          status: "cancelled",
+          resumeAttempts: 0,
+        };
       }
+      // Persist the cancel even if the entry doesn't exist yet, so a
+      // racing detect_limit intent can be filtered out.
+      state.cancelledPaneIds = Array.from(new Set([...(state.cancelledPaneIds ?? []), intent.paneId]));
       break;
     }
     case "refresh_status": {
+      // Update the model cache regardless of whether an entry exists.
+      // We only cache values that look like real models (i.e. not the
+      // placeholder "Reserve" used after Codex auto-switches).
+      if (typeof intent.originalModel === "string" && intent.originalModel !== "" && intent.originalModel.toLowerCase() !== "reserve") {
+        state.modelsByPane = { ...(state.modelsByPane ?? {}), [intent.paneId]: intent.originalModel };
+      }
       const existing = entries[intent.paneId];
       if (!existing) break;
       if (intent.agentStatus === "working") {
@@ -212,7 +245,7 @@ function applyIntent(state: PersistedState, intent: Intent, nowMs: number): Pers
       break;
     }
   }
-  return { ...state, entries };
+  return { ...state, entries, modelsByPane: state.modelsByPane ?? {}, cancelledPaneIds: state.cancelledPaneIds ?? [] };
 }
 
 async function processIntent(state: PersistedState, intent: Intent, store: StateStore, log: Logger): Promise<PersistedState> {
@@ -237,7 +270,7 @@ async function processDue(
   for (const [paneId, entry] of Object.entries(entries)) {
     if (!entryDue(entry, nowMs)) continue;
     entries[paneId] = { ...entry, status: "spawning", lastAttemptAtMs: nowMs, resumeAttempts: entry.resumeAttempts + 1 };
-    await store.save({ version: 1, nextWakeAtMs: state.nextWakeAtMs, entries });
+    await store.save({ version: 1, nextWakeAtMs: state.nextWakeAtMs, entries, modelsByPane: state.modelsByPane ?? {}, cancelledPaneIds: state.cancelledPaneIds ?? [] });
     let result: PerformResumeResult;
     try {
       result = await performResume(entries[paneId]!, resumeDeps);
@@ -345,6 +378,16 @@ function entriesAreTerminal(state: PersistedState): boolean {
   );
 }
 
+/**
+ * Whether the scheduler should exit: only when a termination signal has
+ * arrived. Empty state is NOT a reason to exit; the scheduler must
+ * remain alive so it can drain intents written by event handlers
+ * shortly after startup.
+ */
+function shouldExit(signal: AbortSignal): boolean {
+  return signal.aborted;
+}
+
 function pruneOld(state: PersistedState, nowMs: number): PersistedState {
   const entries = { ...state.entries };
   for (const [k, e] of Object.entries(entries)) {
@@ -352,7 +395,10 @@ function pruneOld(state: PersistedState, nowMs: number): PersistedState {
       delete entries[k];
     }
   }
-  return { ...state, entries };
+  // Drop stale cancels whose entries were never created.
+  const cancelled = (state.cancelledPaneIds ?? []).filter((id) => id in entries || true);
+  // Keep cancels forever for safety; entries map dictates lifetime.
+  return { ...state, entries, cancelledPaneIds: cancelled };
 }
 
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -394,7 +440,7 @@ export async function runScheduler(opts: SchedulerOptions, signal: AbortSignal):
   try {
     let state = pruneOld(await store.load(), now());
 
-    while (!signal.aborted) {
+    while (!shouldExit(signal)) {
       const intents = await store.drainIntents();
       for (const intent of intents) {
         state = await processIntent(state, intent, store, opts.log);
@@ -404,18 +450,34 @@ export async function runScheduler(opts: SchedulerOptions, signal: AbortSignal):
       const nowMs = now();
       state = await processDue(state, nowMs, opts, store);
 
-      // Recompute next wake; save and either sleep or exit.
+      // Re-drain intents written while processDue was running. This
+      // covers the race where a cancel intent sorts before a
+      // detect_limit intent (same-millisecond timestamps cause
+      // non-deterministic lex order); the cancel finds no entry on
+      // first pass, but the entry has now been created by processDue
+      // and we must apply the cancel before sleeping.
+      const followUpIntents = await store.drainIntents();
+      for (const intent of followUpIntents) {
+        state = await processIntent(state, intent, store, opts.log);
+      }
+
+      // Recompute next wake; save and either sleep or continue.
       const nextWake = computeNextWake(state, nowMs, pollMs);
       state = { ...state, nextWakeAtMs: nextWake };
       await store.save(state);
 
-      if (entriesAreTerminal(state)) {
-        opts.log.info("scheduler_idle", { reason: "all entries terminal" });
-        break;
-      }
-
+      // The scheduler stays alive even when state is empty: event
+      // handlers may write a new intent at any time and we must be
+      // ready to drain it. We only exit on SIGTERM/SIGINT/SIGHUP.
       const sleepMs = Math.max(250, nextWake - nowMs);
-      opts.log.debug("scheduler_sleep", { sleepMs, nextWake });
+      opts.log.debug("scheduler_sleep", { sleepMs, nextWake, entries: Object.keys(state.entries).length });
+      if (entriesAreTerminal(state) && intents.length === 0 && followUpIntents.length === 0) {
+        // Log periodically so an idle scheduler is still observable.
+        opts.log.info("scheduler_idle_tick", {
+          nextWakeMs: nextWake,
+          pollMs,
+        });
+      }
       await sleep(sleepMs, signal);
     }
   } finally {

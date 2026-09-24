@@ -43,7 +43,7 @@ export async function resumeNow(
   const result = await performResume(entry, { herdr, config, log, now: opts.now ?? Date.now });
   const nextEntries = { ...state.entries };
   nextEntries[paneId] = applyOutcome(entry, result, Date.now());
-  await store.save({ version: 1, nextWakeAtMs: state.nextWakeAtMs, entries: nextEntries });
+  await store.save({ version: 1, nextWakeAtMs: state.nextWakeAtMs, entries: nextEntries, modelsByPane: state.modelsByPane, cancelledPaneIds: state.cancelledPaneIds ?? [] });
   if (result.outcome.kind === "resumed") {
     return { invoked: true, reason: result.outcome.kind, paneId, resumePaneId: result.outcome.resumePaneId };
   }

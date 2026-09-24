@@ -68,6 +68,23 @@ export interface PersistedState {
   version: 1;
   nextWakeAtMs: number;
   entries: Record<string, ResumeEntry>;
+  /**
+   * Most-recently-seen Codex model per pane, keyed by pane id. Populated
+   * whenever a codex pane reports its model (typically on every event
+   * hook invocation while the user is running their preferred model).
+   * The plugin uses this cache when a usage limit is later detected on
+   * a pane whose TUI has already auto-switched to "Luna Reserve" — at
+   * that point the on-screen model is no longer the user's original.
+   */
+  modelsByPane: Record<string, string>;
+  /**
+   * Pane ids whose pending auto-resume must be cancelled. Persisted
+   * across iterations so a cancel intent that races ahead of a
+   * detect_limit intent (same-millisecond timestamps cause
+   * non-deterministic lex order) still takes effect when the entry
+   * finally arrives.
+   */
+  cancelledPaneIds: string[];
 }
 
 export const CURRENT_STATE_VERSION = 1 as const;

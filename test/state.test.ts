@@ -22,6 +22,7 @@ describe("StateStore", () => {
     const state = await store.load();
     assert.equal(state.version, 1);
     assert.deepEqual(state.entries, {});
+    assert.deepEqual(state.modelsByPane, {});
     assert.equal(state.nextWakeAtMs, 0);
   });
 
@@ -32,18 +33,21 @@ describe("StateStore", () => {
       entries: {
         "w1:p3": entryFixture("w1:p3"),
       },
+      modelsByPane: { "w1:p3": "gpt-5.6-sol" },
+      cancelledPaneIds: [],
     };
     await store.save(state);
     const reloaded = await store.load();
     assert.equal(reloaded.entries["w1:p3"]?.status, "waiting");
     assert.equal(reloaded.entries["w1:p3"]?.resetAtMs, 9_000);
     assert.equal(reloaded.nextWakeAtMs, 1_000);
+    assert.equal(reloaded.modelsByPane["w1:p3"], "gpt-5.6-sol");
   });
 
   it("overwrites the file on each save (no temp leftovers)", async () => {
-    await store.save({ version: 1, nextWakeAtMs: 0, entries: { "w1:p1": entryFixture("w1:p1") } });
+    await store.save({ version: 1, nextWakeAtMs: 0, entries: { "w1:p1": entryFixture("w1:p1") }, modelsByPane: {}, cancelledPaneIds: [] });
     const files1 = await listDir(dir);
-    await store.save({ version: 1, nextWakeAtMs: 0, entries: { "w1:p1": entryFixture("w1:p1") } });
+    await store.save({ version: 1, nextWakeAtMs: 0, entries: { "w1:p1": entryFixture("w1:p1") }, modelsByPane: {}, cancelledPaneIds: [] });
     const files2 = await listDir(dir);
     assert.deepEqual(files1.sort(), files2.sort());
   });
@@ -78,6 +82,23 @@ describe("StateStore", () => {
     assert.equal(drained[1]?.kind, "cancel");
     const second = await store.drainIntents();
     assert.equal(second.length, 0);
+  });
+
+  it("survives a restart by reloading pending entries AND model cache", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(
+      join(dir, "state.json"),
+      JSON.stringify({
+        version: 1,
+        nextWakeAtMs: 0,
+        entries: { "w1:p1": entryFixture("w1:p1") },
+        modelsByPane: { "w1:p1": "gpt-5.6-sol" },
+      }),
+      "utf8",
+    );
+    const reloaded = await store.load();
+    assert.equal(reloaded.entries["w1:p1"]?.status, "waiting");
+    assert.equal(reloaded.modelsByPane["w1:p1"], "gpt-5.6-sol");
   });
 });
 
