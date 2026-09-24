@@ -126,6 +126,27 @@ describe("detectUsageLimit", () => {
     const d = detectUsageLimit(text, NOW);
     assert.equal(d.detected, true);
   });
+
+  it("matches typographic apostrophes (Codex CLI style)", () => {
+    const text = "■ You’ve hit your usage limit. Upgrade to Pro or try again at Sep 25th, 2026 3:15 AM.";
+    const d = detectUsageLimit(text, NOW);
+    assert.equal(d.detected, true);
+  });
+
+  it("parses 'Sep 25th, 2026 3:15 AM' style timestamps", () => {
+    const text = "try again at Sep 25th, 2026 3:15 AM.";
+    const d = detectUsageLimit(text, NOW);
+    assert.equal(d.detected, true);
+    // Sep 25, 2026 03:15 AM UTC == 2026-09-25 03:15:00Z
+    assert.equal(d.resetAtMs, Date.UTC(2026, 8, 25, 3, 15, 0));
+  });
+
+  it("parses 'Sep 25, 2026' without ordinal suffix", () => {
+    const text = "try again at Sep 25, 2026 3:15 AM";
+    const d = detectUsageLimit(text, NOW);
+    assert.equal(d.detected, true);
+    assert.equal(d.resetAtMs, Date.UTC(2026, 8, 25, 3, 15, 0));
+  });
 });
 
 describe("isStillLimited", () => {

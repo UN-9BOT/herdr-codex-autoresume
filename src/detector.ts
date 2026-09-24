@@ -45,7 +45,10 @@ export function detectCodexModel(text: string): string | null {
 const MAX_SNIPPET = 200;
 
 const LIMIT_KEYWORDS: Array<{ rule: string; pattern: RegExp }> = [
-  { rule: "usage-limit-phrase", pattern: /you(?:'ve|'ve| have) hit your usage limit/i },
+  // Codex's TUI prints apostrophes as typographic (’) which is U+2019,
+  // not the ASCII straight quote we usually type. Accept both forms
+  // throughout.
+  { rule: "usage-limit-phrase", pattern: /you(?:['']ve| have) hit your usage limit/i },
   { rule: "usage-limit-keyword", pattern: /\busage limit\b/i },
   { rule: "rate-limit-keyword", pattern: /\brate[- ]?limit\b/i },
   { rule: "limit-resets-phrase", pattern: /\blimit\s+(?:will\s+)?resets?\b/i },
@@ -198,10 +201,11 @@ const ABSOLUTE_PARSERS: AbsoluteParser[] = [
     },
   },
   // "until Sept 25 01:00 UTC" / "resets September 25 at 1:00 AM"
+  // / "try again at Sep 25th, 2026 3:15 AM"
   {
     rule: "month-name-day-time",
     pattern:
-      /\b(?:until|resets?\s+at|reset\s+at|try\s+again\s+at|at)\s+([A-Za-z]{3,9})\s+(\d{1,2})(?:,?\s+(\d{4}))?(?:\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)?)?(?:\s*(UTC|Z|[+-]\d{1,2}:?\d{2}))?/,
+      /\b(?:until|resets?\s+at|reset\s+at|try\s+again\s+at|at)\s+([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?(?:\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)?)?(?:\s*(UTC|Z|[+-]\d{1,2}:?\d{2}))?/,
     build: (m, now) => {
       const monthName = m[1]!.toLowerCase();
       const month = MONTH_NAMES[monthName];
