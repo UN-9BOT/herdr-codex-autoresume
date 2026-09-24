@@ -248,12 +248,24 @@ export class CliHerdrClient implements HerdrClient {
   }
 
   async readPane(target: string, options: { source?: "recent" | "recent-unwrapped" | "visible" | "detection"; lines?: number } = {}): Promise<string> {
+    // `pane read` returns plain UTF-8 text (not JSON), so we cannot
+    // reuse `call()` which assumes a JSON envelope. Spawn directly.
     const args = ["pane", "read", target];
     if (options.source) args.push("--source", options.source);
     if (typeof options.lines === "number") args.push("--lines", String(options.lines));
     try {
-      const text = await this.call<string>(args);
-      return text;
+      const result = await runProcess(this.bin, args);
+      if (result.status !== 0) {
+        // Some failures emit a JSON error envelope to stderr; surface
+        // a structured error if so.
+        const parsed = parseJsonResponse<unknown>(result.stderr || result.stdout);
+        if (!parsed.ok) {
+          if (parsed.code === "pane_not_found") return "";
+          throw new HerdrCommandError(parsed.code, parsed.message, result.status);
+        }
+        throw new HerdrCommandError("unknown_error", result.stderr || "pane read failed", result.status);
+      }
+      return result.stdout;
     } catch (err) {
       if (err instanceof HerdrCommandError && err.code === "pane_not_found") return "";
       throw err;
@@ -273,12 +285,29 @@ export class CliHerdrClient implements HerdrClient {
   }
 
   async sendText(target: string, text: string): Promise<void> {
-    await this.call<unknown>(["pane", "send-text", target, text]);
+    // `pane send-text` returns no JSON envelope; the call succeeds when
+    // the process exits 0. Surface the structured error envelope if
+    // the server reports one on stderr.
+    const result = await runProcess(this.bin, ["pane", "send-text", target, text]);
+    if (result.status !== 0) {
+      const parsed = parseJsonResponse<unknown>(result.stderr || result.stdout);
+      if (!parsed.ok) {
+        throw new HerdrCommandError(parsed.code, parsed.message || "pane send-text failed", result.status);
+      }
+      throw new HerdrCommandError("unknown_error", "pane send-text failed", result.status);
+    }
   }
 
   async sendKeys(target: string, keys: string[]): Promise<void> {
     if (keys.length === 0) return;
-    await this.call<unknown>(["pane", "send-keys", target, ...keys]);
+    const result = await runProcess(this.bin, ["pane", "send-keys", target, ...keys]);
+    if (result.status !== 0) {
+      const parsed = parseJsonResponse<unknown>(result.stderr || result.stdout);
+      if (!parsed.ok) {
+        throw new HerdrCommandError(parsed.code, parsed.message || "pane send-keys failed", result.status);
+      }
+      throw new HerdrCommandError("unknown_error", "pane send-keys failed", result.status);
+    }
   }
 
   async waitForAgentStatus(target: string, until: AgentStatus[], timeoutMs: number): Promise<AgentStatus> {
@@ -306,13 +335,22 @@ export class CliHerdrClient implements HerdrClient {
 
   async waitForPaneOutput(target: string, regex: string, timeoutMs: number): Promise<string | null> {
     const args = ["pane", "wait-output", target, "--regex", regex, "--timeout", String(timeoutMs)];
-    try {
-      const result = await this.call<{ matched_line?: string }>(args);
-      return result.matched_line ?? null;
-    } catch (err) {
-      if (err instanceof HerdrCommandError && err.code === "timeout") return null;
-      throw err;
+    // `pane wait-output` returns JSON: either `{ result: { matched_line, ... } }`
+    // on match or `{ error: { code: "timeout" } }` on timeout.
+    const result = await runProcess(this.bin, args);
+    if (result.status !== 0) {
+      const parsed = parseJsonResponse<unknown>(result.stderr || result.stdout);
+      if (!parsed.ok) {
+        if (parsed.code === "timeout") return null;
+        throw new HerdrCommandError(parsed.code, parsed.message, result.status);
+      }
+      throw new HerdrCommandError("unknown_error", "pane wait-output failed", result.status);
     }
+    const parsed = parseJsonResponse<{ matched_line?: string }>(result.stdout);
+    if (!parsed.ok) {
+      throw new HerdrCommandError(parsed.code, parsed.message, result.status);
+    }
+    return parsed.result.matched_line ?? null;
   }
 
   async splitPane(opts: { sourcePaneId: string; direction: "right" | "down"; ratio?: number; cwd?: string }): Promise<string> {
@@ -326,7 +364,15 @@ export class CliHerdrClient implements HerdrClient {
 
   async runPaneCommand(target: string, command: string[]): Promise<void> {
     if (command.length === 0) throw new HerdrCommandError("invalid_command", "command must not be empty");
-    await this.call<unknown>(["pane", "run", target, ...command]);
+    // `pane run` returns no JSON envelope on success.
+    const result = await runProcess(this.bin, ["pane", "run", target, ...command]);
+    if (result.status !== 0) {
+      const parsed = parseJsonResponse<unknown>(result.stderr || result.stdout);
+      if (!parsed.ok) {
+        throw new HerdrCommandError(parsed.code, parsed.message || "pane run failed", result.status);
+      }
+      throw new HerdrCommandError("unknown_error", "pane run failed", result.status);
+    }
   }
 
   async spawnPaneForAgent(opts: { sourcePaneId: string; direction: "right" | "down"; cwd?: string }): Promise<string> {
