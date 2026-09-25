@@ -243,11 +243,11 @@ describe("extractSessionIdFromPaneText", () => {
     );
   });
 
-  it("returns the first match when several are present", () => {
+  it("returns the LAST match (most recent status line) when several are present", () => {
     const text = "first 01a0d4d7-5a6e-7012-8e69-3109f62df7cd second 445dd2e9-f393-42ec-82fb-94e3a6839c9b";
     assert.equal(
       extractSessionIdFromPaneText(text),
-      "01a0d4d7-5a6e-7012-8e69-3109f62df7cd",
+      "445dd2e9-f393-42ec-82fb-94e3a6839c9b",
     );
   });
 

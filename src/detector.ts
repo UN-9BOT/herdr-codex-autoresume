@@ -360,14 +360,18 @@ export function isStillLimited(text: string, now: number = Date.now()): boolean 
 
 /**
  * Extract a Codex conversation session id from the pane text. Codex
- * shows a UUID on its status line; we accept the first match that
- * looks like a UUID.
+ * prints the session id on every status line, including the current
+ * one at the bottom of the pane. We return the LAST match — that is
+ * the most recent status line and reliably the current session. The
+ * scrollback may contain other UUIDs (git shas, log IDs) that we do
+ * not want to mistake for a session id.
  */
 export function extractSessionIdFromPaneText(text: string): string | undefined {
   if (!text) return undefined;
-  const m = text.match(
-    /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i,
+  // Use a global regex and pick the last match.
+  const matches = text.match(
+    /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi,
   );
-  if (!m) return undefined;
-  return m[1]!.toLowerCase();
+  if (!matches || matches.length === 0) return undefined;
+  return matches[matches.length - 1]!.toLowerCase();
 }
