@@ -52,7 +52,7 @@ export async function handleAgentDetected(ctx: EventContext): Promise<void> {
   const store = new StateStore(stateDir);
   let originalModel: string | undefined;
   try {
-    const text = await herdr.readPane(paneId, { source: "recent", lines: config.maxReadLines });
+    const text = await herdr.readPane(paneId, { source: "recent-unwrapped", lines: Math.max(config.maxReadLines, 240) });
     const detected = detectCodexModel(text);
     originalModel = detected && isLikelyCodexModel(detected) ? detected : config.defaultCodexModel;
   } catch {
@@ -88,10 +88,13 @@ export async function handleAgentStatusChanged(ctx: EventContext): Promise<void>
   if (!pane.agent || pane.agent.toLowerCase() !== "codex") return;
   const store = new StateStore(stateDir);
 
-  // Read once; reuse for refresh + limit detection.
+  // Read once; reuse for refresh + limit detection. Use
+  // `recent-unwrapped` so the scrollback extends past the visible
+  // viewport — the Codex session id in the status line scrolled away
+  // after the limit message was emitted.
   let text = "";
   try {
-    text = await herdr.readPane(paneId, { source: "recent", lines: config.maxReadLines });
+    text = await herdr.readPane(paneId, { source: "recent-unwrapped", lines: Math.max(config.maxReadLines, 240) });
   } catch {
     /* ignore — the refresh intent is still useful */
   }
