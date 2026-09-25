@@ -178,7 +178,7 @@ function applyIntent(state: PersistedState, intent: Intent, nowMs: number): Pers
     }
     case "schedule_now": {
       const existing = entries[intent.paneId];
-      if (existing && existing.status === "waiting") {
+      if (existing && (existing.status === "waiting" || existing.status === "still_limited")) {
         entries[intent.paneId] = { ...existing, resetAtMs: intent.atMs };
         state.nextWakeAtMs = Math.min(state.nextWakeAtMs || Number.MAX_SAFE_INTEGER, intent.atMs);
       }

@@ -2,7 +2,7 @@
 // a fresh process; it must finish quickly and cannot own a long-running
 // loop. It writes intent files; the long-lived scheduler drains them.
 
-import { detectCodexModel, detectUsageLimit, isLikelyCodexModel } from "./detector.js";
+import { detectCodexModel, detectQuotaAvailable, detectUsageLimit, isLikelyCodexModel } from "./detector.js";
 import { loadConfig } from "./config.js";
 import { type HerdrClient, type PaneSnapshot } from "./herdr.js";
 import { StateStore } from "./state.js";
@@ -114,17 +114,35 @@ export async function handleAgentStatusChanged(ctx: EventContext): Promise<void>
     return;
   }
   const detection = detectUsageLimit(text, Date.now());
-  if (!detection.detected) return;
-  await store.writeIntent({
-    kind: "detect_limit",
-    paneId,
-    workspaceId: event.data.workspace_id,
-    agentKind: "codex",
-    sessionId: pane.agentSessionId,
-    originalModel,
-    detectedAtMs: Date.now(),
-    resetAtMs: detection.resetAtMs,
-    snippet: detection.rawMatchedText,
-  });
-  log.info("intent_detect_limit", { paneId, resetAtMs: detection.resetAtMs, originalModel });
+  if (detection.detected) {
+    await store.writeIntent({
+      kind: "detect_limit",
+      paneId,
+      workspaceId: event.data.workspace_id,
+      agentKind: "codex",
+      sessionId: pane.agentSessionId,
+      originalModel,
+      detectedAtMs: Date.now(),
+      resetAtMs: detection.resetAtMs,
+      snippet: detection.rawMatchedText,
+    });
+    log.info("intent_detect_limit", { paneId, resetAtMs: detection.resetAtMs, originalModel });
+  }
+  // The pane can also signal "quota is available again, model is back"
+  // before the scheduled reset time (e.g. the user upgraded their
+  // plan). When that happens, the plugin should attempt the resume
+  // flow immediately instead of waiting for the timer.
+  const quota = detectQuotaAvailable(text);
+  if (quota.detected) {
+    await store.writeIntent({
+      kind: "schedule_now",
+      paneId,
+      atMs: Date.now(),
+    });
+    log.info("intent_schedule_now_quota_available", {
+      paneId,
+      resumedModel: quota.model,
+      originalModel,
+    });
+  }
 }

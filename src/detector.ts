@@ -57,6 +57,32 @@ export function isLikelyCodexModel(candidate: string): boolean {
   return true;
 }
 
+export interface QuotaAvailable {
+  detected: boolean;
+  model?: string;
+}
+
+/**
+ * Detect Codex's on-screen "switched back to <model>" indicator. When
+ * the quota returns the TUI logs a bullet line:
+ *   "Automatically switched back to gpt-5.6-sol high because ordinary
+ *    usage is available again."
+ * When that text is present, the user's goal is still paused but the
+ * underlying quota window has reset — the plugin should not wait for
+ * the scheduled resetAtMs and instead attempt a resume immediately.
+ */
+export function detectQuotaAvailable(text: string): QuotaAvailable {
+  if (!text) return { detected: false };
+  // Match: "Automatically switched back to <model> <quality>".
+  const m = text.match(
+    /switched\s+back\s+to\s+([A-Za-z][A-Za-z0-9.\-]{0,40})\s+(high|medium|low)\b/i,
+  );
+  if (!m || !m[1]) return { detected: false };
+  const model = m[1];
+  if (!isLikelyCodexModel(model)) return { detected: false };
+  return { detected: true, model };
+}
+
 const MAX_SNIPPET = 200;
 
 const LIMIT_KEYWORDS: Array<{ rule: string; pattern: RegExp }> = [

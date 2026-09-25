@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 
 import {
   detectCodexModel,
+  detectQuotaAvailable,
   detectUsageLimit,
   isLikelyCodexModel,
   isStillLimited,
@@ -198,5 +199,36 @@ describe("isLikelyCodexModel", () => {
     assert.equal(isLikelyCodexModel("GPT-5.4"), true);
     assert.equal(isLikelyCodexModel("GPT-5.6-sol"), true);
     assert.equal(isLikelyCodexModel("gpt-6-sol"), true);
+  });
+});
+
+describe("detectQuotaAvailable", () => {
+  it("detects 'switched back to <model>' indicator", () => {
+    const text = "■ Automatically switched back to gpt-5.6-sol high because ordinary usage is available again.";
+    const r = detectQuotaAvailable(text);
+    assert.equal(r.detected, true);
+    assert.equal(r.model, "gpt-5.6-sol");
+  });
+
+  it("detects uppercase model name", () => {
+    const text = "• Automatically switched back to GPT-5.6-Sol high because ordinary usage is available again.";
+    const r = detectQuotaAvailable(text);
+    assert.equal(r.detected, true);
+    assert.equal(r.model, "GPT-5.6-Sol");
+  });
+
+  it("rejects when the indicator is absent", () => {
+    assert.equal(detectQuotaAvailable("nothing relevant here").detected, false);
+  });
+
+  it("rejects Reserve / Luna Reserve restores", () => {
+    assert.equal(
+      detectQuotaAvailable("Automatically switched back to GPT-Reserve high").detected,
+      false,
+    );
+  });
+
+  it("returns null model when no quality keyword follows", () => {
+    assert.equal(detectQuotaAvailable("switched back to gpt-5").detected, false);
   });
 });

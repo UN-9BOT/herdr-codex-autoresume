@@ -234,6 +234,59 @@ describe("scheduler", () => {
     assert.equal(state.entries["w1:p1"]?.originalModel, "gpt-5.6-sol");
   });
 
+  it("schedule_now wakes a waiting entry immediately on next tick", async () => {
+    // Pre-seed an entry whose resetAtMs is in the immediate future
+    // (10 seconds away). The schedule_now intent will then bump it to
+    // "now" so the next scheduler tick is due.
+    const store = new StateStore(dir);
+    const FAR_FUTURE = NOW0 + 10_000;
+    await store.save({
+      version: 1,
+      nextWakeAtMs: 0,
+      entries: {
+        "w1:p1": {
+          paneId: "w1:p1",
+          agentKind: "codex",
+          sessionId: SESSION,
+          originalModel: "gpt-5.6-sol",
+          detectedAtMs: NOW0,
+          resetAtMs: FAR_FUTURE,
+          status: "waiting",
+          resumeAttempts: 0,
+        },
+      },
+      modelsByPane: { "w1:p1": "gpt-5.6-sol" },
+      cancelledPaneIds: [],
+    });
+    let now = NOW0;
+    await store.writeIntent({ kind: "schedule_now", paneId: "w1:p1", atMs: NOW0 + 50 });
+    const herdr = new FakeHerdr({
+      panes: { "w1:p1": makeCodexPane("w1:p1", { agentSessionId: SESSION }) },
+      texts: { "w1:p1": MODEL_TEXT },
+      nextPaneIds: ["w1:p2"],
+      dialogMatch: "Resume paused goal?",
+    });
+    const cfg = {
+      ...defaultConfig(),
+      pollIntervalSeconds: 1,
+      resumeVerificationSeconds: 1,
+      resumePaneLaunchTimeoutSeconds: 1,
+      resumeDialogTimeoutSeconds: 1,
+    };
+    const ac = new AbortController();
+    const promise = runScheduler({ stateDir: dir, config: cfg, herdr, log: new NoopLogger(), now: () => now }, ac.signal);
+    // Advance the clock past the schedule_now's atMs so the next tick
+    // processes the entry. The scheduler runs every second; allow a
+    // generous grace window for the loop body to complete.
+    now = NOW0 + 200;
+    await new Promise((r) => setTimeout(r, 1_500));
+    ac.abort();
+    await promise;
+    const after = await store.load();
+    assert.equal(after.entries["w1:p1"]?.status, "resumed");
+    assert.equal(herdr.splitPaneCalls.length, 1);
+  });
+
   it("survives a restart by reloading pending entries from disk", async () => {
     const store = new StateStore(dir);
     await store.save({
