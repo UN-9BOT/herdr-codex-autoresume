@@ -139,19 +139,30 @@ export async function handleAgentStatusChanged(ctx: EventContext): Promise<void>
   }
   // The pane can also signal "quota is available again, model is back"
   // before the scheduled reset time (e.g. the user upgraded their
-  // plan). When that happens, the plugin should attempt the resume
-  // flow immediately instead of waiting for the timer.
+  // plan). When that happens, Codex has typically already
+  // auto-switched back to the user's original model in the same
+  // TUI, so the plugin should send `/goal resume` to the same pane
+  // rather than spinning up a fresh `codex resume`.
   const quota = detectQuotaAvailable(text);
   if (quota.detected) {
+    await store.writeIntent({
+      kind: "schedule_now_inplace",
+      paneId,
+      atMs: Date.now(),
+    });
+    log.info("intent_schedule_now_inplace", {
+      paneId,
+      resumedModel: quota.model,
+      originalModel,
+    });
+  } else {
+    // As a fallback, schedule an in-place resume at the recorded
+    // resetAtMs — the scheduler will fall through to performResume
+    // (new-pane flow) if the limit is still active.
     await store.writeIntent({
       kind: "schedule_now",
       paneId,
       atMs: Date.now(),
-    });
-    log.info("intent_schedule_now_quota_available", {
-      paneId,
-      resumedModel: quota.model,
-      originalModel,
     });
   }
 }

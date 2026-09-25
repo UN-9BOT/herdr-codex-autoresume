@@ -14,6 +14,7 @@ export type EntryStatus =
   | "due"
   | "spawning"
   | "resuming"
+  | "inplace_resuming"
   | "resumed"
   | "still_limited"
   | "failed"
@@ -133,6 +134,17 @@ export type Intent =
     }
   | {
       kind: "schedule_now";
+      paneId: string;
+      atMs: number;
+    }
+  | {
+      /**
+       * Same as `schedule_now` plus an instruction that the resume
+       * should happen in-place: send `/goal resume` to the original
+       * pane (which already auto-switched back to the user's model)
+       * instead of spawning a fresh `codex resume` pane.
+       */
+      kind: "schedule_now_inplace";
       paneId: string;
       atMs: number;
     };

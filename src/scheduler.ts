@@ -3,7 +3,13 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { nextResetAfterFailure } from "./backoff.js";
-import { performResume, type PerformResumeResult, type ResumeOutcome } from "./resume.js";
+import {
+  performInPlaceResume,
+  performResume,
+  type PerformInPlaceResult,
+  type PerformResumeResult,
+  type ResumeOutcome,
+} from "./resume.js";
 import { StateStore } from "./state.js";
 import type { HerdrClient } from "./herdr.js";
 import type {
@@ -127,6 +133,10 @@ function entryDue(entry: ResumeEntry, nowMs: number): boolean {
   return dueAt > 0 && dueAt <= nowMs;
 }
 
+function entryInPlace(entry: ResumeEntry): boolean {
+  return entry.status === "inplace_resuming";
+}
+
 function applyIntent(state: PersistedState, intent: Intent, nowMs: number): PersistedState {
   const entries = { ...state.entries };
   switch (intent.kind) {
@@ -180,6 +190,14 @@ function applyIntent(state: PersistedState, intent: Intent, nowMs: number): Pers
       const existing = entries[intent.paneId];
       if (existing && (existing.status === "waiting" || existing.status === "still_limited")) {
         entries[intent.paneId] = { ...existing, resetAtMs: intent.atMs };
+        state.nextWakeAtMs = Math.min(state.nextWakeAtMs || Number.MAX_SAFE_INTEGER, intent.atMs);
+      }
+      break;
+    }
+    case "schedule_now_inplace": {
+      const existing = entries[intent.paneId];
+      if (existing && (existing.status === "waiting" || existing.status === "still_limited")) {
+        entries[intent.paneId] = { ...existing, resetAtMs: intent.atMs, status: "inplace_resuming" };
         state.nextWakeAtMs = Math.min(state.nextWakeAtMs || Number.MAX_SAFE_INTEGER, intent.atMs);
       }
       break;
@@ -268,6 +286,69 @@ async function processDue(
   const entries = { ...state.entries };
   const resumeDeps = { herdr: deps.herdr, config: deps.config, log: deps.log, now: deps.now ?? Date.now };
   for (const [paneId, entry] of Object.entries(entries)) {
+    if (entryInPlace(entry)) {
+      // In-place resume path: CodeX has already auto-switched back
+      // to the user's model; just send `/goal resume` to the same pane.
+      let result: PerformInPlaceResult;
+      try {
+        result = await performInPlaceResume(entries[paneId]!, resumeDeps);
+      } catch (err) {
+        deps.log.error("inplace_resume_error", { paneId, err: (err as Error).message });
+        entries[paneId] = {
+          ...entries[paneId]!,
+          status: "failed",
+          lastError: (err as Error).message,
+        };
+        continue;
+      }
+      switch (result.outcome.kind) {
+        case "resumed":
+          entries[paneId] = {
+            ...entries[paneId]!,
+            ...result.patch,
+            status: "resumed",
+            resumedAtMs: result.outcome.resumedAtMs,
+          };
+          break;
+        case "still_limited":
+          entries[paneId] = {
+            ...entries[paneId]!,
+            ...result.patch,
+            status: "waiting",
+            lastError: "still_limited",
+            lastLimitSnippet: result.outcome.snippet ?? entries[paneId]!.lastLimitSnippet,
+          };
+          break;
+        case "pane_missing":
+        case "session_mismatch":
+          entries[paneId] = {
+            ...entries[paneId]!,
+            status: "failed",
+            lastError: `${result.outcome.kind}: ${("reason" in result.outcome) ? result.outcome.reason : ""}`,
+            lastAttemptAtMs: nowMs,
+          };
+          break;
+        case "not_yet_ready":
+          entries[paneId] = {
+            ...entries[paneId]!,
+            status: "waiting",
+            lastAttemptAtMs: nowMs,
+            lastError: "inplace_resume_unverified",
+            resetAtMs: nowMs + Math.min(deps.config.retryMaxSeconds, 30) * 1000,
+          };
+          state.nextWakeAtMs = Math.min(state.nextWakeAtMs || Number.MAX_SAFE_INTEGER, nowMs + 30_000);
+          break;
+        case "skipped_dry_run":
+          entries[paneId] = {
+            ...entries[paneId]!,
+            status: "resumed",
+            resumedAtMs: Date.now(),
+            lastError: undefined,
+          };
+          break;
+      }
+      continue;
+    }
     if (!entryDue(entry, nowMs)) continue;
     entries[paneId] = { ...entry, status: "spawning", lastAttemptAtMs: nowMs, resumeAttempts: entry.resumeAttempts + 1 };
     await store.save({ version: 1, nextWakeAtMs: state.nextWakeAtMs, entries, modelsByPane: state.modelsByPane ?? {}, cancelledPaneIds: state.cancelledPaneIds ?? [] });

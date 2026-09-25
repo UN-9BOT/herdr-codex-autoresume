@@ -82,12 +82,96 @@ export interface PerformResumeResult {
   patch: Partial<ResumeEntry>;
 }
 
+export type InPlaceResumeOutcome =
+  | { kind: "resumed"; paneId: string; resumedAtMs: number }
+  | { kind: "pane_missing"; paneId: string }
+  | { kind: "session_mismatch"; paneId: string; reason: string }
+  | { kind: "still_limited"; paneId: string; snippet?: string }
+  | { kind: "not_yet_ready"; paneId: string }
+  | { kind: "skipped_dry_run"; paneId: string };
+
+export interface PerformInPlaceResult {
+  outcome: InPlaceResumeOutcome;
+  patch: Partial<ResumeEntry>;
+}
+
+/**
+ * In-place resume: when Codex has already auto-switched back to the
+ * user's original model in the same pane, sending `/goal resume` to
+ * that pane is enough. This is the cheaper path used when
+ * `detectQuotaAvailable` fires.
+ */
+export async function performInPlaceResume(
+  entry: ResumeEntry,
+  deps: ResumeDeps,
+): Promise<PerformInPlaceResult> {
+  const pane = await deps.herdr.getPane(entry.paneId);
+  if (!pane) {
+    deps.log.warn("pane_missing", { paneId: entry.paneId });
+    return { outcome: { kind: "pane_missing", paneId: entry.paneId }, patch: {} };
+  }
+  if (!pane.agent || pane.agent.toLowerCase() !== "codex") {
+    deps.log.warn("session_mismatch", { paneId: entry.paneId, reason: "agent is not codex" });
+    return {
+      outcome: { kind: "session_mismatch", paneId: entry.paneId, reason: "agent is not codex" },
+      patch: {},
+    };
+  }
+  if (entry.sessionId && pane.agentSessionId && pane.agentSessionId !== entry.sessionId) {
+    deps.log.warn("session_mismatch", {
+      paneId: entry.paneId,
+      reason: "agent_session_id changed",
+      expected: entry.sessionId,
+      actual: pane.agentSessionId,
+    });
+    return {
+      outcome: { kind: "session_mismatch", paneId: entry.paneId, reason: "agent_session_id changed" },
+      patch: {},
+    };
+  }
+  const text = await deps.herdr.readPane(entry.paneId, {
+    source: "recent-unwrapped",
+    lines: Math.max(deps.config.maxReadLines, 240),
+  });
+  const nowMs = deps.now();
+  // Require that the pane is no longer limited — otherwise the resume
+  // slash command would bounce off the limit dialog again.
+  if (isStillLimited(text, nowMs)) {
+    const detection = detectUsageLimit(text, nowMs);
+    deps.log.info("still_limited_preflight_inplace", { paneId: entry.paneId });
+    return {
+      outcome: { kind: "still_limited", paneId: entry.paneId, snippet: detection.rawMatchedText },
+      patch: {},
+    };
+  }
+  if (deps.config.dryRun) {
+    deps.log.info("inplace_dry_run", { paneId: entry.paneId });
+    return { outcome: { kind: "skipped_dry_run", paneId: entry.paneId }, patch: {} };
+  }
+  await deps.herdr.sendText(entry.paneId, deps.config.resumeCommand);
+  await deps.herdr.sendKeys(entry.paneId, ["enter"]);
+  const observed = await deps.herdr.waitForAgentStatus(
+    entry.paneId,
+    ["working", "done"],
+    Math.max(deps.config.resumeVerificationSeconds * 1000, 5_000),
+  );
+  if (observed === "working" || observed === "done") {
+    deps.log.info("inplace_resume_success", { paneId: entry.paneId, observed });
+    return {
+      outcome: { kind: "resumed", paneId: entry.paneId, resumedAtMs: nowMs },
+      patch: { resumedAtMs: nowMs },
+    };
+  }
+  deps.log.warn("inplace_resume_unverified", { paneId: entry.paneId, observed });
+  return { outcome: { kind: "not_yet_ready", paneId: entry.paneId }, patch: {} };
+}
+
 /**
  * Execute the resume orchestration:
  *   1. preflight the original pane
  *   2. wait until the recorded reset time has passed
  *   3. spawn a fresh pane (split, default direction: right)
- *   4. launch `codex -m <model> resume <sessionId>` in it
+ *   4. launch `codex -m <model> resume <session-id>` in it
  *   5. wait for the "Resume paused goal?" dialog
  *   6. select option 1 and submit Enter
  *   7. confirm the new pane transitions to working

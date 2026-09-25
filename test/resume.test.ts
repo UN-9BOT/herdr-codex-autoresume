@@ -9,6 +9,7 @@ import { FakeHerdr, makeCodexPane } from "./fake-herdr.js";
 import { NoopLogger } from "../src/log.js";
 
 const NOW = Date.UTC(2026, 8, 24, 20, 0, 0);
+const SESSION = "0190aaaa-bbbb-cccc-dddd-000000000001";
 
 function baseDeps(herdr: FakeHerdr) {
   return {
@@ -194,5 +195,76 @@ describe("performResume", () => {
       // Only Enter is allowed.
       assert.deepEqual(call.keys, ["enter"]);
     }
+  });
+});
+
+describe("performInPlaceResume", () => {
+  const READY_TEXT = "■ Automatically switched back to gpt-5.6-sol high because ordinary usage is available again.\n› Ask Codex to do anything";
+
+  it("sends /goal resume + Enter to the SAME pane when quota is back", async () => {
+    const herdr = new FakeHerdr({
+      panes: { "w1:p1": makeCodexPane("w1:p1", { agentSessionId: SESSION }) },
+      texts: { "w1:p1": READY_TEXT },
+    });
+    const entry = {
+      paneId: "w1:p1",
+      agentKind: "codex" as const,
+      sessionId: SESSION,
+      originalModel: "gpt-5.6-sol",
+      detectedAtMs: NOW,
+      resetAtMs: NOW,
+      status: "inplace_resuming" as const,
+      resumeAttempts: 0,
+    };
+    const { performInPlaceResume } = await import("../src/resume.js");
+    const result = await performInPlaceResume(entry, baseDeps(herdr));
+    assert.equal(result.outcome.kind, "resumed");
+    assert.equal(herdr.splitPaneCalls.length, 0, "must not split");
+    assert.equal(herdr.sendTextCalls.length, 1);
+    assert.equal(herdr.sendTextCalls[0]?.text, "/goal resume");
+    assert.deepEqual(herdr.sendKeysCalls[0]?.keys, ["enter"]);
+  });
+
+  it("returns still_limited when pane text still shows the limit", async () => {
+    const herdr = new FakeHerdr({
+      panes: { "w1:p1": makeCodexPane("w1:p1") },
+      texts: { "w1:p1": MODEL_TEXT }, // still shows the limit
+    });
+    const entry = {
+      paneId: "w1:p1",
+      agentKind: "codex" as const,
+      sessionId: SESSION,
+      originalModel: "gpt-5.6-sol",
+      detectedAtMs: NOW,
+      resetAtMs: NOW,
+      status: "inplace_resuming" as const,
+      resumeAttempts: 0,
+    };
+    const { performInPlaceResume } = await import("../src/resume.js");
+    const result = await performInPlaceResume(entry, baseDeps(herdr));
+    assert.equal(result.outcome.kind, "still_limited");
+    assert.equal(herdr.sendTextCalls.length, 0);
+  });
+
+  it("does nothing when dryRun is set", async () => {
+    const herdr = new FakeHerdr({
+      panes: { "w1:p1": makeCodexPane("w1:p1") },
+      texts: { "w1:p1": READY_TEXT },
+    });
+    const entry = {
+      paneId: "w1:p1",
+      agentKind: "codex" as const,
+      sessionId: SESSION,
+      originalModel: "gpt-5.6-sol",
+      detectedAtMs: NOW,
+      resetAtMs: NOW,
+      status: "inplace_resuming" as const,
+      resumeAttempts: 0,
+    };
+    const { performInPlaceResume } = await import("../src/resume.js");
+    const deps = { ...baseDeps(herdr), config: { ...baseDeps(herdr).config, dryRun: true } };
+    const result = await performInPlaceResume(entry, deps);
+    assert.equal(result.outcome.kind, "skipped_dry_run");
+    assert.equal(herdr.sendTextCalls.length, 0);
   });
 });
