@@ -7,6 +7,7 @@ import {
   detectCodexModel,
   detectQuotaAvailable,
   detectUsageLimit,
+  extractSessionIdFromPaneText,
   isLikelyCodexModel,
   isStillLimited,
   parseAbsoluteReset,
@@ -230,5 +231,27 @@ describe("detectQuotaAvailable", () => {
 
   it("returns null model when no quality keyword follows", () => {
     assert.equal(detectQuotaAvailable("switched back to gpt-5").detected, false);
+  });
+});
+
+describe("extractSessionIdFromPaneText", () => {
+  it("extracts a UUID from the Codex status line", () => {
+    const text = "GPT-5.4 high · /home/user/proj · Context 91% used · 01a0d4d7-5a6e-7012-8e69-3109f62df7cd · ← for agents";
+    assert.equal(
+      extractSessionIdFromPaneText(text),
+      "01a0d4d7-5a6e-7012-8e69-3109f62df7cd",
+    );
+  });
+
+  it("returns the first match when several are present", () => {
+    const text = "first 01a0d4d7-5a6e-7012-8e69-3109f62df7cd second 445dd2e9-f393-42ec-82fb-94e3a6839c9b";
+    assert.equal(
+      extractSessionIdFromPaneText(text),
+      "01a0d4d7-5a6e-7012-8e69-3109f62df7cd",
+    );
+  });
+
+  it("returns undefined when no UUID is present", () => {
+    assert.equal(extractSessionIdFromPaneText("nothing here"), undefined);
   });
 });

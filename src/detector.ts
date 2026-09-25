@@ -354,3 +354,17 @@ export function isStillLimited(text: string, now: number = Date.now()): boolean 
   if (typeof detection.resetAtMs === "number") return detection.resetAtMs > now;
   return true;
 }
+
+/**
+ * Extract a Codex conversation session id from the pane text. Codex
+ * shows a UUID on its status line; we accept the first match that
+ * looks like a UUID.
+ */
+export function extractSessionIdFromPaneText(text: string): string | undefined {
+  if (!text) return undefined;
+  const m = text.match(
+    /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i,
+  );
+  if (!m) return undefined;
+  return m[1]!.toLowerCase();
+}

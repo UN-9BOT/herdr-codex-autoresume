@@ -2,7 +2,7 @@
 // a fresh process; it must finish quickly and cannot own a long-running
 // loop. It writes intent files; the long-lived scheduler drains them.
 
-import { detectCodexModel, detectQuotaAvailable, detectUsageLimit, isLikelyCodexModel } from "./detector.js";
+import { detectCodexModel, detectQuotaAvailable, detectUsageLimit, extractSessionIdFromPaneText, isLikelyCodexModel } from "./detector.js";
 import { loadConfig } from "./config.js";
 import { type HerdrClient, type PaneSnapshot } from "./herdr.js";
 import { StateStore } from "./state.js";
@@ -113,6 +113,12 @@ export async function handleAgentStatusChanged(ctx: EventContext): Promise<void>
     // Don't try to detect limits when the agent is busy working.
     return;
   }
+  // Session id is reported by Herdr when the official Codex integration
+  // calls `pane report-agent-session`. But the integration only reports
+  // it once per Codex session; when Codex auto-switches to Luna Reserve
+  // and then back, the integration may have forgotten the id. Fall back
+  // to the on-screen UUID (Codex prints it in the status line).
+  const sessionId = pane.agentSessionId ?? extractSessionIdFromPaneText(text);
   const detection = detectUsageLimit(text, Date.now());
   if (detection.detected) {
     await store.writeIntent({
@@ -120,7 +126,7 @@ export async function handleAgentStatusChanged(ctx: EventContext): Promise<void>
       paneId,
       workspaceId: event.data.workspace_id,
       agentKind: "codex",
-      sessionId: pane.agentSessionId,
+      sessionId,
       originalModel,
       detectedAtMs: Date.now(),
       resetAtMs: detection.resetAtMs,
