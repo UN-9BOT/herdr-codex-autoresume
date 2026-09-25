@@ -368,16 +368,25 @@ export function isStillLimited(text: string, now: number = Date.now()): boolean 
 
 /**
  * Extract a Codex conversation session id from the pane text. Codex
- * prints the session id on every status line, including the current
- * one at the bottom of the pane. We return the LAST match — that is
- * the most recent status line and reliably the current session. The
- * scrollback may contain other UUIDs (git shas, log IDs) that we do
- * not want to mistake for a session id.
+ * prints the session id on every status line and in the `/status`
+ * dialog, but the TUI wraps long tokens across lines (e.g. the
+ * 36-char UUID is broken into pieces). We collapse soft-wrap splits
+ * before matching the canonical 8-4-4-4-12 UUID shape so a wrapped
+ * session id still parses.
  */
 export function extractSessionIdFromPaneText(text: string): string | undefined {
   if (!text) return undefined;
-  // Use a global regex and pick the last match.
-  const matches = text.match(
+  // Strip box-drawing line-art, then glue tokens split across
+  // soft-wrap breaks. A typical wrap looks like "01a0d4d7-\n 5a6e-..."
+  // or "01a0d4d7\n 5a6e-...". Keep alphanumerics, hyphens, and the
+  // single dashes that are part of UUID structure.
+  const cleaned = text
+    .replace(/[\u2500-\u257f]/g, "") // box-drawing chars
+    .replace(/-\s*\n\s*/g, "-") // hyphen at end of line + newline
+    .replace(/\s*\n\s*/g, ""); // any remaining line break (multi-segment)
+  // After cleanup, scan for the canonical UUID shape and pick the
+  // last match.
+  const matches = cleaned.match(
     /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi,
   );
   if (!matches || matches.length === 0) return undefined;

@@ -261,4 +261,23 @@ describe("extractSessionIdFromPaneText", () => {
   it("returns undefined when no UUID is present", () => {
     assert.equal(extractSessionIdFromPaneText("nothing here"), undefined);
   });
+
+  it("reassembles a UUID split across a soft-wrap", () => {
+    // Simulated TUI /status view where the UUID wraps after the first 8
+    // hex chars (1a0d4d7-) and continues on the next row.
+    const wrapped = "Session:                     01a0d4d7-\n                    5a6e-7012-8e69-3109f62df7cd";
+    assert.equal(
+      extractSessionIdFromPaneText(wrapped),
+      "01a0d4d7-5a6e-7012-8e69-3109f62df7cd",
+    );
+  });
+
+  it("ignores box-drawing line-art characters", () => {
+    const wrapped =
+      "│  Session:                     01a0d4d7-5a6e-7012-8e69-3109f62df7cd │";
+    assert.equal(
+      extractSessionIdFromPaneText(wrapped),
+      "01a0d4d7-5a6e-7012-8e69-3109f62df7cd",
+    );
+  });
 });
