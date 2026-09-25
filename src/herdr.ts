@@ -70,10 +70,11 @@ export interface HerdrClient {
   /** Best-effort check that a pane still exists. Returns false on `pane_not_found` style errors. */
   paneExists(paneId: string): Promise<boolean>;
   /**
-   * Wait for a regex match in the pane's recent output. Returns the matched
-   * text (or null on timeout).
+   * Wait for a regex match in the pane's recent output. Returns the
+   * matched text (or null on timeout). Accepts both a regex source
+   * string (`/pattern/flags`) and a `RegExp` instance.
    */
-  waitForPaneOutput(target: string, regex: string, timeoutMs: number): Promise<string | null>;
+  waitForPaneOutput(target: string, regex: string | RegExp, timeoutMs: number): Promise<string | null>;
   /**
    * Split a pane. Returns the new pane id. `direction` is "right" or
    * "down" (the only directions Herdr's CLI exposes for split).
@@ -333,8 +334,13 @@ export class CliHerdrClient implements HerdrClient {
     return pane !== null;
   }
 
-  async waitForPaneOutput(target: string, regex: string, timeoutMs: number): Promise<string | null> {
-    const args = ["pane", "wait-output", target, "--regex", regex, "--timeout", String(timeoutMs)];
+  async waitForPaneOutput(
+    target: string,
+    regex: string | RegExp,
+    timeoutMs: number,
+  ): Promise<string | null> {
+    const source = typeof regex === "string" ? regex : regex.source;
+    const args = ["pane", "wait-output", target, "--regex", source, "--timeout", String(timeoutMs)];
     // `pane wait-output` returns JSON: either `{ result: { matched_line, ... } }`
     // on match or `{ error: { code: "timeout" } }` on timeout.
     const result = await runProcess(this.bin, args);

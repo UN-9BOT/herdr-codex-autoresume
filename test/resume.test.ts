@@ -225,6 +225,31 @@ describe("performInPlaceResume", () => {
     assert.deepEqual(herdr.sendKeysCalls[0]?.keys, ["enter"]);
   });
 
+  it("answers the Resume-paused-goal dialog when one appears", async () => {
+    const herdr = new FakeHerdr({
+      panes: { "w1:p1": makeCodexPane("w1:p1", { agentSessionId: SESSION }) },
+      texts: { "w1:p1": READY_TEXT },
+      dialogMatch: "Resume paused goal?",
+    });
+    const entry = {
+      paneId: "w1:p1",
+      agentKind: "codex" as const,
+      sessionId: SESSION,
+      originalModel: "gpt-5.6-sol",
+      detectedAtMs: NOW,
+      resetAtMs: NOW,
+      status: "inplace_resuming" as const,
+      resumeAttempts: 0,
+    };
+    const { performInPlaceResume } = await import("../src/resume.js");
+    const result = await performInPlaceResume(entry, baseDeps(herdr));
+    assert.equal(result.outcome.kind, "resumed");
+    // First /goal resume + Enter, then 1 + Enter.
+    assert.equal(herdr.sendTextCalls.length, 2);
+    assert.equal(herdr.sendTextCalls[0]?.text, "/goal resume");
+    assert.equal(herdr.sendTextCalls[1]?.text, "1");
+  });
+
   it("returns still_limited when pane text still shows the limit", async () => {
     const herdr = new FakeHerdr({
       panes: { "w1:p1": makeCodexPane("w1:p1") },

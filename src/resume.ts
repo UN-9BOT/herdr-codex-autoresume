@@ -165,18 +165,39 @@ export async function performInPlaceResume(
     deps.log.info("inplace_dry_run", { paneId: entry.paneId });
     return { outcome: { kind: "skipped_dry_run", paneId: entry.paneId }, patch: {} };
   }
+  // Codex may show a "Resume paused goal?" confirmation dialog when
+  // the goal had file attachments. If the pane already shows the
+  // dialog, the user (or our plugin) has to confirm by selecting
+  // option 1 ("Resume goal").
+  const selectionRegex = /Resume paused goal\?|Resuming goal|Use your reset to continue/;
+
   await deps.herdr.sendText(entry.paneId, deps.config.resumeCommand);
   await deps.herdr.sendKeys(entry.paneId, ["enter"]);
+
+  // Give the slash command / dialog a brief window to settle.
+  await new Promise<void>((r) => setTimeout(r, 1500));
+
+  const confirmation = await deps.herdr.waitForPaneOutput(
+    entry.paneId,
+    selectionRegex,
+    5_000,
+  );
+  if (confirmation !== null) {
+    deps.log.info("inplace_dialog_seen", { paneId: entry.paneId });
+    await deps.herdr.sendText(entry.paneId, "1");
+    await deps.herdr.sendKeys(entry.paneId, ["enter"]);
+  }
+
   const observed = await deps.herdr.waitForAgentStatus(
     entry.paneId,
     ["working", "done"],
-    Math.max(deps.config.resumeVerificationSeconds * 1000, 5_000),
+    Math.max(deps.config.resumeVerificationSeconds * 1000, 10_000),
   );
   if (observed === "working" || observed === "done") {
     deps.log.info("inplace_resume_success", { paneId: entry.paneId, observed });
     return {
-      outcome: { kind: "resumed", paneId: entry.paneId, resumedAtMs: nowMs },
-      patch: { resumedAtMs: nowMs },
+      outcome: { kind: "resumed", paneId: entry.paneId, resumedAtMs: deps.now() },
+      patch: { resumedAtMs: deps.now() },
     };
   }
   deps.log.warn("inplace_resume_unverified", { paneId: entry.paneId, observed });

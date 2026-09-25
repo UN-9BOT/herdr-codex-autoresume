@@ -69,16 +69,14 @@ export class FakeHerdr implements HerdrClient {
   async waitForAgentStatus(target: string, until: AgentStatus[]): Promise<AgentStatus> {
     const pane = this.panes[target];
     if (!pane) return "unknown";
-    // Simulate the side-effect: after the plugin sends /goal resume,
-    // CodeX transitions idle → working. Mimic that here when the most
-    // recent send-text call was a slash command + a following
-    // send-keys "enter".
+    // Simulate the side-effect: after the plugin sends any text that
+    // asks Codex to do something (slash command OR dialog answer like
+    // "1") followed by Enter, Codex transitions idle → working.
     if (
       until.includes("working") &&
       !until.includes(pane.agentStatus) &&
       this.sendTextCalls.length > 0 &&
-      this.sendKeysCalls.length > 0 &&
-      /^\s*\//.test(this.sendTextCalls[this.sendTextCalls.length - 1]?.text ?? "")
+      this.sendKeysCalls.length > 0
     ) {
       this.panes[target] = { ...pane, agentStatus: "working" };
       return "working";
