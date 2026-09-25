@@ -45,6 +45,13 @@ export interface ResumeEntry {
   originalModel?: string;
   detectedAtMs: number;
   resetAtMs?: number;
+  /**
+   * The limit's originally parsed resetAtMs. When a `schedule_now_inplace`
+   * intent rewrites `resetAtMs` to "now", we save the original here so
+   * the entry can be re-armed after an in-place attempt fails (e.g.
+   * because the limit was still active).
+   */
+  originalResetAtMs?: number;
   /** Snippet of the matched usage-limit text, capped at 200 chars. */
   lastLimitSnippet?: string;
   status: EntryStatus;

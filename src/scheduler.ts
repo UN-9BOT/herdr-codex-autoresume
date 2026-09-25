@@ -197,7 +197,16 @@ function applyIntent(state: PersistedState, intent: Intent, nowMs: number): Pers
     case "schedule_now_inplace": {
       const existing = entries[intent.paneId];
       if (existing && (existing.status === "waiting" || existing.status === "still_limited")) {
-        entries[intent.paneId] = { ...existing, resetAtMs: intent.atMs, status: "inplace_resuming" };
+        // Remember the originally scheduled reset time so we can
+        // re-arm the entry if the in-place attempt fails (pane is
+        // still limited, session id missing, etc.).
+        const originalResetAtMs = existing.resetAtMs ?? intent.atMs;
+        entries[intent.paneId] = {
+          ...existing,
+          resetAtMs: intent.atMs,
+          originalResetAtMs,
+          status: "inplace_resuming",
+        };
         state.nextWakeAtMs = Math.min(state.nextWakeAtMs || Number.MAX_SAFE_INTEGER, intent.atMs);
       }
       break;
@@ -317,6 +326,14 @@ async function processDue(
             status: "waiting",
             lastError: "still_limited",
             lastLimitSnippet: result.outcome.snippet ?? entries[paneId]!.lastLimitSnippet,
+            // Restore the originally scheduled reset time so the
+            // new-pane flow doesn't kick in until the limit truly
+            // expires. If we have no recorded original (e.g. the
+            // entry is fresh), schedule a 30s poll so we can
+            // detect the next "switched back" event.
+            resetAtMs:
+              entries[paneId]!.originalResetAtMs ??
+              nowMs + Math.min(deps.config.retryMaxSeconds, 30) * 1000,
           };
           break;
         case "pane_missing":

@@ -43,6 +43,7 @@ function coerceEntry(paneId: string, raw: unknown): ResumeEntry | null {
   if (typeof raw.sessionId === "string") entry.sessionId = raw.sessionId;
   if (typeof raw.originalModel === "string") entry.originalModel = raw.originalModel;
   if (typeof raw.resetAtMs === "number") entry.resetAtMs = raw.resetAtMs;
+  if (typeof raw.originalResetAtMs === "number") entry.originalResetAtMs = raw.originalResetAtMs;
   if (typeof raw.lastLimitSnippet === "string") entry.lastLimitSnippet = raw.lastLimitSnippet;
   if (typeof raw.lastAttemptAtMs === "number") entry.lastAttemptAtMs = raw.lastAttemptAtMs;
   if (typeof raw.lastError === "string") entry.lastError = raw.lastError;
