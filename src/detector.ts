@@ -36,12 +36,33 @@ export function detectCodexModel(text: string, tailChars: number = 1500): string
   const slice = text.length > tailChars ? text.slice(-tailChars) : text;
   // TUI soft-wraps split model names like "gpt-5.6-\nsol" or
   // "GPT-5.6-S\nol". Collapse soft-wrap hyphens and whitespace before
-  // matching, then capture the full model token up to the quality
-  // keyword.
+  // matching.
   const collapsed = slice.replace(/-\s*\n\s*/g, "-").replace(/\s+/g, " ");
-  const m = collapsed.match(/\b([A-Za-z][A-Za-z0-9][A-Za-z0-9.\-]{0,40})\s+(high|medium|low)\b/);
-  if (!m || !m[1]) return null;
-  const candidate = m[1].trim();
+  // Codex prints the model in two distinct layouts:
+  //
+  // (1) the chat prompt footer:
+  //     "GPT-5.6-Sol high · ~/.hermes/projects/fas..."
+  //     → match: <name> <quality>
+  //
+  // (2) the /status dialog Model row:
+  //     "Model:  GPT-5.6-Sol (reasoning high, summaries auto)"
+  //     → match: "Model:" followed by the first token, OR the long
+  //       form with quality keyword inside the parens
+  //
+  // The /status "Model:" prefix makes the second layout unambiguous.
+  // Try the `Model: <name>` form first, then fall back to the prompt
+  // footer form (rejecting matches inside parens).
+  let candidate: string | null = null;
+  const statusMatch = collapsed.match(/Model:\s+([A-Za-z][A-Za-z0-9][A-Za-z0-9.\-]{0,40})(?:\s|$|\()/);
+  if (statusMatch && statusMatch[1]) {
+    candidate = statusMatch[1].trim();
+  } else {
+    const m = collapsed.match(
+      /(?<!\()\b([A-Za-z][A-Za-z0-9][A-Za-z0-9.\-]{0,40})\s+(high|medium|low)\b/,
+    );
+    if (m && m[1]) candidate = m[1].trim();
+  }
+  if (!candidate) return null;
   if (!/^[A-Za-z][A-Za-z0-9.\-]{0,40}$/.test(candidate)) return null;
   if (!isLikelyCodexModel(candidate)) return null;
   return candidate;

@@ -189,6 +189,14 @@ describe("detectCodexModel", () => {
   it("returns null on empty input", () => {
     assert.equal(detectCodexModel(""), null);
   });
+
+  it("rejects descriptors inside parentheses (Model: <name> (reasoning high))", () => {
+    // Real /status layout: name on one side, descriptor on the other.
+    // The parser must keep the model name (GPT-5.6-Sol) and ignore
+    // the trailing "(reasoning high, summaries auto)" string.
+    const text = "Model:                       GPT-5.6-Sol (reasoning high, summaries auto)";
+    assert.equal(detectCodexModel(text), "GPT-5.6-Sol");
+  });
 });
 
 describe("isLikelyCodexModel", () => {
