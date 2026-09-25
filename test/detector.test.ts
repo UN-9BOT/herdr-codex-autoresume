@@ -232,6 +232,13 @@ describe("detectQuotaAvailable", () => {
   it("returns null model when no quality keyword follows", () => {
     assert.equal(detectQuotaAvailable("switched back to gpt-5").detected, false);
   });
+
+  it("tolerates soft-wrapped line breaks inside the model name", () => {
+    const text = "• Automatically switched back to gpt-5.6-\nsol high because ordinary usage is available again.";
+    const r = detectQuotaAvailable(text);
+    assert.equal(r.detected, true);
+    assert.equal(r.model, "gpt-5.6-sol");
+  });
 });
 
 describe("extractSessionIdFromPaneText", () => {

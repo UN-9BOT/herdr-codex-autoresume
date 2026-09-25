@@ -34,10 +34,12 @@ export interface LimitDetection {
 export function detectCodexModel(text: string, tailChars: number = 1500): string | null {
   if (!text) return null;
   const slice = text.length > tailChars ? text.slice(-tailChars) : text;
-  // Allow uppercase/lowercase and optional dashes/dots, followed by a
-  // quality keyword ("high" / "medium" / "low"). The dot separates major
-  // and minor versions; dashes are also allowed.
-  const m = slice.match(/\b([A-Za-z][A-Za-z0-9][A-Za-z0-9.\-]{0,40})\s+(high|medium|low)\b/);
+  // TUI soft-wraps split model names like "gpt-5.6-\nsol" or
+  // "GPT-5.6-S\nol". Collapse soft-wrap hyphens and whitespace before
+  // matching, then capture the full model token up to the quality
+  // keyword.
+  const collapsed = slice.replace(/-\s*\n\s*/g, "-").replace(/\s+/g, " ");
+  const m = collapsed.match(/\b([A-Za-z][A-Za-z0-9][A-Za-z0-9.\-]{0,40})\s+(high|medium|low)\b/);
   if (!m || !m[1]) return null;
   const candidate = m[1].trim();
   if (!/^[A-Za-z][A-Za-z0-9.\-]{0,40}$/.test(candidate)) return null;
@@ -76,8 +78,14 @@ export interface QuotaAvailable {
  */
 export function detectQuotaAvailable(text: string): QuotaAvailable {
   if (!text) return { detected: false };
-  // Match: "Automatically switched back to <model> <quality>".
-  const m = text.match(
+  // Match: "Automatically switched back to <model> <quality>". Codex's
+  // TUI soft-wraps narrow lines so the model name and quality keyword
+  // may be on different lines and separated by a soft-wrap hyphen
+  // (e.g. "gpt-5.6-\nsol high"). Collapse whitespace AND any
+  // soft-wrap hyphens around the break so we can capture the full
+  // model name across the wrap.
+  const collapsed = text.replace(/-\s*\n\s*/g, "-").replace(/\s+/g, " ");
+  const m = collapsed.match(
     /switched\s+back\s+to\s+([A-Za-z][A-Za-z0-9.\-]{0,40})\s+(high|medium|low)\b/i,
   );
   if (!m || !m[1]) return { detected: false };
