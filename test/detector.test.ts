@@ -280,4 +280,15 @@ describe("extractSessionIdFromPaneText", () => {
       "01a0d4d7-5a6e-7012-8e69-3109f62df7cd",
     );
   });
+
+  it("matches a UUID followed by another word character", () => {
+    // Real Codex /status output puts "01a0d4d7-5a6e-7012-8e69-3109f62df7cdContext"
+    // on one row — the trailing `\b` would reject this even though the
+    // UUID is well-formed.
+    const text = "DefaultSession:                     01a0d4d7-5a6e-7012-8e69-3109f62df7cdContext window: 76% left";
+    assert.equal(
+      extractSessionIdFromPaneText(text),
+      "01a0d4d7-5a6e-7012-8e69-3109f62df7cd",
+    );
+  });
 });

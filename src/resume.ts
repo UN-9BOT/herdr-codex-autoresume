@@ -1,4 +1,9 @@
-import { detectCodexModel, detectUsageLimit, isStillLimited } from "./detector.js";
+import {
+  detectCodexModel,
+  detectQuotaAvailable,
+  detectUsageLimit,
+  isStillLimited,
+} from "./detector.js";
 import type { HerdrClient, PaneSnapshot } from "./herdr.js";
 import type { Logger, PluginConfig, ResumeEntry } from "./types.js";
 
@@ -134,15 +139,27 @@ export async function performInPlaceResume(
     lines: Math.max(deps.config.maxReadLines, 240),
   });
   const nowMs = deps.now();
-  // Require that the pane is no longer limited — otherwise the resume
-  // slash command would bounce off the limit dialog again.
-  if (isStillLimited(text, nowMs)) {
+  // The in-place path only runs when CodeX already auto-switched back
+  // to the original model. When that's true, the scrollback will
+  // still carry the OLD limit message — the user's pane can show
+  // BOTH "Automatically switched back to <model> high" and
+  // "try again at …". We let the resume proceed; Codex's /goal slash
+  // handler is interactive enough to deal with the cached limit view.
+  const quotaAvailable = detectQuotaAvailable(text);
+  const stillLimited = isStillLimited(text, nowMs);
+  if (stillLimited && !quotaAvailable.detected) {
     const detection = detectUsageLimit(text, nowMs);
     deps.log.info("still_limited_preflight_inplace", { paneId: entry.paneId });
     return {
       outcome: { kind: "still_limited", paneId: entry.paneId, snippet: detection.rawMatchedText },
       patch: {},
     };
+  }
+  if (quotaAvailable.detected) {
+    deps.log.info("inplace_quota_available", {
+      paneId: entry.paneId,
+      model: quotaAvailable.model,
+    });
   }
   if (deps.config.dryRun) {
     deps.log.info("inplace_dry_run", { paneId: entry.paneId });

@@ -385,9 +385,12 @@ export function extractSessionIdFromPaneText(text: string): string | undefined {
     .replace(/-\s*\n\s*/g, "-") // hyphen at end of line + newline
     .replace(/\s*\n\s*/g, ""); // any remaining line break (multi-segment)
   // After cleanup, scan for the canonical UUID shape and pick the
-  // last match.
+  // last match. We only anchor a leading word boundary — a trailing
+  // `\b` would fail to match when the next character is also
+  // word-class (e.g. the UUID is followed by "Context window:" in the
+  // /status box).
   const matches = cleaned.match(
-    /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi,
+    /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi,
   );
   if (!matches || matches.length === 0) return undefined;
   return matches[matches.length - 1]!.toLowerCase();
