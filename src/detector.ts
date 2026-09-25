@@ -23,22 +23,25 @@ export interface LimitDetection {
  *   "gpt-5.6-sol high · ..."
  *   "GPT-6-Sol high · ..."
  *
+ * Searches only the last `tailChars` bytes of the input — the status
+ * line is always at the bottom of the pane, and the rest of the
+ * transcript is full of incidental `<token> high` matches (e.g.
+ * "reasoning high in this branch") that would produce false positives.
+ *
  * Returns the raw model token (the slice before the size keyword) and
  * null when no recognizable model marker is present.
  */
-export function detectCodexModel(text: string): string | null {
+export function detectCodexModel(text: string, tailChars: number = 1500): string | null {
   if (!text) return null;
+  const slice = text.length > tailChars ? text.slice(-tailChars) : text;
   // Allow uppercase/lowercase and optional dashes/dots, followed by a
   // quality keyword ("high" / "medium" / "low"). The dot separates major
   // and minor versions; dashes are also allowed.
-  const m = text.match(/\b([A-Za-z][A-Za-z0-9][A-Za-z0-9.\-]{0,40})\s+(high|medium|low)\b/);
+  const m = slice.match(/\b([A-Za-z][A-Za-z0-9][A-Za-z0-9.\-]{0,40})\s+(high|medium|low)\b/);
   if (!m || !m[1]) return null;
   const candidate = m[1].trim();
   if (!/^[A-Za-z][A-Za-z0-9.\-]{0,40}$/.test(candidate)) return null;
-  // Skip lines that are clearly not the model header. The header is the
-  // first token on the status line, so we look at the whole text and
-  // accept the first match. Most Codex status lines have only one
-  // quality keyword.
+  if (!isLikelyCodexModel(candidate)) return null;
   return candidate;
 }
 
